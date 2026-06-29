@@ -1,0 +1,66 @@
+[
+  {
+    "id": 1,
+    "type": "good",
+    "title": "發現寶藏！",
+    "description": "你喺草叢入面發現咗一個古老寶箱！\n打開攞到 $200！",
+    "effect": { "money": 200 },
+    "emoji": "💎"
+  },
+  {
+    "id": 2,
+    "type": "bad",
+    "title": "獅子襲擊！",
+    "description": "一隻大獅子突然衝出嚟！\n好彩你走得快，但係跌咗 $50。",
+    "effect": { "money": -50 },
+    "emoji": "🦁"
+  },
+  {
+    "id": 3,
+    "type": "neutral",
+    "title": "口渴飲椰汁",
+    "description": "行咗成日好口渴⋯⋯\n買杯新鮮椰汁飲，$10。",
+    "effect": { "money": -10 },
+    "emoji": "🥥"
+  },
+  {
+    "id": 4,
+    "type": "good",
+    "title": "嚮導幫忙",
+    "description": "一位熱心嘅 local 嚮導帶你行捷徑！\n慳返好多時間，獲得 $100。",
+    "effect": { "money": 100 },
+    "emoji": "🧭"
+  },
+  {
+    "id": 5,
+    "type": "bad",
+    "title": "感染瘧疾",
+    "description": "唔小心俾瘧蚊咬到⋯⋯\n要去診所買藥，損失 $80。",
+    "effect": { "money": -80 },
+    "emoji": "🤒"
+  },
+  {
+    "id": 6,
+    "type": "good",
+    "title": "市集豐收",
+    "description": "你去到一個熱鬧嘅市集，\n用低成本入咗批貨轉賣，賺咗 $150！",
+    "effect": { "money": 150 },
+    "emoji": "🏪"
+  },
+  {
+    "id": 7,
+    "type": "bad",
+    "title": "落大雨",
+    "description": "突然落超大暴雨，\n啲裝備濕晒要買過新嘅，損失 $60。",
+    "effect": { "money": -60 },
+    "emoji": "🌧️"
+  },
+  {
+    "id": 8,
+    "type": "neutral",
+    "title": "遇到旅行者",
+    "description": "遇到一個 backpacker，\n大家交換旅遊故事，好開心！\n冇金錢增減。",
+    "effect": { "money": 0 },
+    "emoji": "🎒"
+  }
+]

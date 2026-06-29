@@ -1,0 +1,22 @@
+{
+  "name": "africa-adventure-2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5",
+    "phaser": "^3.87"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2",
+    "vite": "^6.3",
+    "tailwindcss": "^3.4",
+    "postcss": "^8.5",
+    "autoprefixer": "^10.4"
+  }
+}
