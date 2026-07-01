@@ -1,365 +1,559 @@
 import Phaser from 'phaser'
-import { PHASER_EVENTS, dispatchGameEvent, onGameEvent } from '../events.js'
+import { dispatchGameEvent, onGameEvent, PHASER_EVENTS } from '../events.js'
 import { gameStore } from '../../stores/gameStore.js'
+import { soundManager } from '../SoundManager.js'
 
 // ── Constants ──
-const W = 800
-const H = 500
-const TILE_SIZE = 100
+const W = 800, H = 500
+const TS = gameStore.tileSize       // 32
+const GRID = gameStore.GRID          // 20
+const MAP_W = GRID * TS             // 640
+const MAP_H = GRID * TS
 
-// 4 cells in a square loop — top-left corner positions
-const TILE_POS = [
-  { x: W / 2 - TILE_SIZE - 12, y: H / 2 - TILE_SIZE - 12 },  // 0: top-left
-  { x: W / 2 + 12,              y: H / 2 - TILE_SIZE - 12 },  // 1: top-right
-  { x: W / 2 + 12,              y: H / 2 + 12 },              // 2: bottom-right
-  { x: W / 2 - TILE_SIZE - 12,  y: H / 2 + 12 },              // 3: bottom-left
+// ── Biome-specific event pools ──
+const EVENTS = {
+  'tile-grass': [
+    { title:'草原漫步',       desc:'你喺廣闊嘅草原上漫步，微風吹過，好舒服。',          emoji:'🌾', money:15 },
+    { title:'遇到長頸鹿',    desc:'一群長頸鹿喺前面食樹葉，好優雅！',                emoji:'🦒', money:10 },
+    { title:'發現野果',      desc:'你搵到一大片野生莓果，摘咗啲來食。',              emoji:'🫐', money:5 },
+    { title:'草原火災',      desc:'遠處有山火，你要繞路，浪費咗時間。',              emoji:'🔥', money:-20 },
+  ],
+  'tile-desert': [
+    { title:'沙塵暴',        desc:'突然颳起超大沙塵暴！你要搵地方避難。',             emoji:'🌪️', money:-30 },
+    { title:'綠洲發現',      desc:'你發現一個隱藏綠洲！有清澈嘅水源。',               emoji:'🌴', money:50 },
+    { title:'沙漠狐狸',      desc:'一隻沙漠狐喺附近徘徊，好可愛。',                   emoji:'🦊', money:8 },
+    { title:'古代遺跡',      desc:'你喺沙堆下發現古代遺跡碎片！',                     emoji:'🏛️', money:80 },
+  ],
+  'tile-river': [
+    { title:'過河流',        desc:'你要搵路過河，好彩有條獨木橋。',                   emoji:'🌉', money:-5 },
+    { title:'釣到大魚',      desc:'你用樹枝整咗支魚竿，釣到一條大魚！',               emoji:'🐟', money:30 },
+    { title:'河馬襲擊',      desc:'一隻河馬突然由水入面衝出嚟！快啲走佬！',           emoji:'🦛', money:-40 },
+    { title:'河邊紮營',      desc:'你喺河邊紮營休息，恢復體力。',                     emoji:'🏕️', money:10 },
+  ],
+  'tile-jungle': [
+    { title:'叢林探險',      desc:'熱帶雨林好茂密，你要用刀開路前進。',               emoji:'🌴', money:-10 },
+    { title:'發現金剛鸚鵡',  desc:'色彩繽紛嘅金剛鸚鵡喺頭頂飛過！',                   emoji:'🦜', money:15 },
+    { title:'蟒蛇！',        desc:'一條大蟒蛇攔住去路！你慢慢後退繞路。',             emoji:'🐍', money:-25 },
+    { title:'隱藏瀑布',      desc:'你發現一個隱藏瀑布，水清到見底！',                 emoji:'💧', money:60 },
+    { title:'食人花',        desc:'差啲踩到食人花！好彩你避開得快。',                 emoji:'🌺', money:-15 },
+  ],
+  'tile-mine': [
+    { title:'發現金礦',      desc:'你喺礦洞入面發現金礦脈！發達啦！',                 emoji:'🪙', money:100 },
+    { title:'礦洞坍塌',      desc:'礦洞突然搖晃，有石頭跌落嚟！快啲走！',             emoji:'💥', money:-50 },
+    { title:'古老工具',      desc:'你搵到以前礦工留低嘅工具，有啲用。',               emoji:'⛏️', money:25 },
+    { title:'蝙蝠襲擊',      desc:'成千上萬蝙蝠由頭頂飛過，嚇死人！',                 emoji:'🦇', money:-10 },
+  ],
+  'tile-village': [
+    { title:'村民款待',      desc:'熱情嘅村民請你食當地特色菜！',                     emoji:'🍲', money:20 },
+    { title:'手工藝市場',    desc:'村民賣你一個手工雕刻嘅非洲動物擺設。',             emoji:'🎨', money:-15 },
+    { title:'酋長召見',      desc:'村莊酋長召見你，俾咗你一個任務。',                 emoji:'👑', money:40 },
+    { title:'學當地舞',      desc:'你同村民一齊跳舞，好開心！',                       emoji:'💃', money:5 },
+  ],
+  'tile-market': [
+    { title:'繁忙市集',      desc:'市集好熱鬧，你買咗啲特別香料。',                   emoji:'🏪', money:-20 },
+    { title:'稀有寶石',      desc:'你用低價買咗粒稀有寶石，轉手賺大錢！',            emoji:'💎', money:120 },
+    { title:'駱駝交易',      desc:'你買咗一隻駱駝幫手運行李，好有用。',               emoji:'🐪', money:-35 },
+    { title:'情報收集',      desc:'你喺市集收集到前方路況嘅有用情報。',               emoji:'🗺️', money:15 },
+  ],
+  'tile-start': [
+    { title:'旅程開始',      desc:'準備好未？非洲探險而家正式開始！',                 emoji:'🚩', money:10 },
+    { title:'裝備檢查',      desc:'你檢查咗吓背囊，發現仲有啲補給品。',              emoji:'🎒', money:15 },
+  ],
+}
+
+// ── Generic events pool ──
+const GENERIC_EVENTS = [
+  { title:'炎熱天氣',   desc:'今日好熱，你飲咗好多水。',                     emoji:'☀️', money:-5 },
+  { title:'好心司機',   desc:'一個貨車司機順路載咗你一程。',                 emoji:'🚚', money:0 },
+  { title:'影相留念',   desc:'你影低咗一張好靚嘅風景相。',                   emoji:'📷', money:0 },
+  { title:'蚊蟲叮咬',   desc:'俾非洲蚊咬到成手都係，好痕。',                 emoji:'🦟', money:-15 },
+  { title:'星空觀測',   desc:'夜晚嘅非洲星空超級靚！你睇到銀河。',         emoji:'⭐', money:5 },
+  { title:'當地朋友',   desc:'你識咗個當地朋友，佢教你幾句土著話。',     emoji:'🤝', money:10 },
+  { title:'猴子偷食',   desc:'一隻頑皮嘅猴子偷走咗你嘅香蕉！',             emoji:'🐒', money:-10 },
+  { title:'彩虹',       desc:'雨後出現一道超大彩虹，橫跨整個天空！',         emoji:'🌈', money:5 },
 ]
 
-// Tile centres (where player stands)
-const TILE_CENTER = TILE_POS.map(p => ({
-  x: p.x + TILE_SIZE / 2,
-  y: p.y + TILE_SIZE / 2,
-}))
-
-const TILE_CFG = [
-  { type: 'start', label: '起點', fill: 0x4caf50, light: 0x66bb6a, dark: 0x2e7d32, icon: '🏠' },
-  { type: 'event', label: '事件', fill: 0x2196f3, light: 0x42a5f5, dark: 0x1565c0, icon: '❓' },
-  { type: 'shop',  label: '市集', fill: 0xff9800, light: 0xffb74d, dark: 0xe65100, icon: '🏪' },
-  { type: 'event', label: '事件', fill: 0x2196f3, light: 0x42a5f5, dark: 0x1565c0, icon: '❗' },
+// ── Stage 2: Property / investment data ──
+const PROPERTY_TYPES = [
+  { id:'farm',   name:'農場',  cost:200, income:30,  icon:'🌽', desc:'種植玉米同咖啡' },
+  { id:'mine',   name:'礦場',  cost:400, income:60,  icon:'⛏️', desc:'開採金礦同鑽石' },
+  { id:'shop',   name:'商店',  cost:300, income:45,  icon:'🏪', desc:'開辦手工藝品店' },
+  { id:'ranch',  name:'牧場',  cost:250, income:35,  icon:'🐄', desc:'飼養非洲動物' },
 ]
 
 export class BoardScene extends Phaser.Scene {
   constructor() {
-    super({ key: 'BoardScene' })
-    this.playerContainer = null
-    this.cleanupFns = []
-    this.diceText = null
-    this.moneyText = null
+    super({ key:'BoardScene' })
+    this.tileSprites = []     // array of {sprite, x, y, highlight}
+    this.playerSprite = null
+    this.highlights = []       // adjacent highlight overlays
+    this.cleanup = []
+    this.uiTexts = {}
+    this.showPropertyShop = false
+    this.swipeStart = null
   }
 
-  /* ================================================================
-   *  CREATE
-   * ================================================================ */
   create() {
     this.cameras.main.setBackgroundColor('#0a0a1a')
-    this.drawBg()
-    this.drawBoard()
+
+    // Generate the 20×20 grid
+    gameStore.generateGrid()
+    gameStore.visitedGrid.clear()
+    gameStore.visitedGrid.add('0,0')
+    gameStore.updateCompassHint()
+
+    // Draw the map
+    this.drawGrid()
+
+    // Player
     this.createPlayer()
-    this.createUI()
+
+    // Treasure markers
+    this.createdTreasureMarkers = []
+    this.treasureGlows = []
+    this.renderTreasureMarkers()
+
+    // Camera
+    this.cameras.main.setBounds(0, 0, MAP_W, MAP_H)
+    this.cameras.main.startFollow(this.playerSprite, true, 0.09, 0.09)
+
+    // Scene UI
+    this.createSceneUI()
+
+    // Input / event listeners
+    this.setupInput()
+    this.setupSwipeInput()
     this.listen()
 
-    // initial HUD
-    this.syncMoney()
+    // Initial update
+    this.updateHighlights()
+    this.updateTreasureReveal()
+    this.syncHUD()
+
+    // Resume AudioContext on first interaction
+    this.input.once('pointerdown', () => soundManager._ensureCtx())
   }
 
-  /* ================================================================
-   *  BACKGROUND
-   * ================================================================ */
-  drawBg() {
-    const g = this.add.graphics()
-    // Night sky
-    g.fillStyle(0x0f0f23)
-    g.fillRect(0, 0, W, H)
+  /* ═══════════════════════════════════════════
+     GRID RENDERING
+     ═══════════════════════════════════════════ */
+  drawGrid() {
+    const grid = gameStore.grid
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        const cell = grid[y][x]
+        const px = x * TS + TS / 2
+        const py = y * TS + TS / 2
 
-    // Stars
-    for (let i = 0; i < 80; i++) {
-      const sx = Phaser.Math.Between(0, W)
-      const sy = Phaser.Math.Between(0, H)
-      const sz = Phaser.Math.FloatBetween(0.3, 1.2)
-      const alpha = Phaser.Math.FloatBetween(0.2, 0.7)
-      g.fillStyle(0xffffff, alpha)
-      g.fillCircle(sx, sy, sz)
+        // Sprite
+        const sprite = this.add.image(px, py, cell.biome)
+        sprite.setScale(TS / 256)   // 256 -> 32
+
+        // Border
+        const border = this.add.graphics()
+        border.lineStyle(1, 0x000000, 0.15)
+        border.strokeRect(x * TS, y * TS, TS, TS)
+
+        this.tileSprites.push({ sprite, border, x, y })
+      }
+    }
+  }
+
+  /* ═══════════════════════════════════════════
+     TREASURE MARKERS
+     ═══════════════════════════════════════════ */
+  renderTreasureMarkers() {
+    this.createdTreasureMarkers = []
+    this.treasureGlows = []
+
+    for (const t of gameStore.treasures) {
+      const px = t.x * TS + TS / 2
+      const py = t.y * TS + TS / 2
+
+      // Glow (hidden by default, shown when within 3 tiles)
+      const glow = this.add.graphics()
+      glow.setDepth(2)
+      this.treasureGlows.push({ glow, treasure: t })
+
+      // Gold sparkle icon (visible only when found or within 3 tiles)
+      const icon = this.add.text(px, py, '✦', {
+        fontSize: '14px', color: '#ffd700',
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(0.5).setDepth(4).setVisible(false)
+
+      this.createdTreasureMarkers.push({ icon, treasure: t })
+    }
+  }
+
+  updateTreasureReveal() {
+    const px = gameStore.playerPos.x
+    const py = gameStore.playerPos.y
+
+    for (let i = 0; i < gameStore.treasures.length; i++) {
+      const t = gameStore.treasures[i]
+      const marker = this.createdTreasureMarkers[i]
+      const glowData = this.treasureGlows[i]
+      if (!marker || !glowData) continue
+
+      if (t.found) {
+        // Show collected checkmark
+        marker.icon.setText('✔️')
+        marker.icon.setVisible(true)
+        glowData.glow.clear()
+        // Add green checkmark
+        const check = this.add.text(t.x * TS + TS - 4, t.y * TS + 4, '✔️', {
+          fontSize: '10px',
+        }).setOrigin(1, 0).setDepth(6)
+        continue
+      }
+
+      const dx = t.x - px
+      const dy = t.y - py
+      const dist = Math.sqrt(dx*dx + dy*dy)
+
+      if (dist <= 3) {
+        // Show shimmer
+        marker.icon.setVisible(true)
+        glowData.glow.clear()
+        glowData.glow.fillStyle(0xffd700, 0.15 + 0.1 * Math.sin(Date.now() / 300 + i))
+        glowData.glow.fillCircle(t.x * TS + TS/2, t.y * TS + TS/2, TS * 0.7)
+        glowData.glow.lineStyle(2, 0xffd700, 0.5)
+        glowData.glow.strokeCircle(t.x * TS + TS/2, t.y * TS + TS/2, TS * 0.7)
+      } else {
+        marker.icon.setVisible(false)
+        glowData.glow.clear()
+      }
+    }
+  }
+
+  /* ═══════════════════════════════════════════
+     PLAYER
+     ═══════════════════════════════════════════ */
+  createPlayer() {
+    const px = gameStore.playerPos.x * TS + TS / 2
+    const py = gameStore.playerPos.y * TS + TS / 2
+
+    this.playerSprite = this.add.image(px, py, 'player')
+    this.playerSprite.setScale(TS / 128)   // 128 -> 32
+    this.playerSprite.setDepth(5)
+
+    // Pulsing glow
+    this.tweens.add({
+      targets: this.playerSprite,
+      alpha: { from: 1, to: 0.6 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+    })
+  }
+
+  /* ═══════════════════════════════════════════
+     HIGHLIGHTS (valid moves)
+     ═══════════════════════════════════════════ */
+  updateHighlights() {
+    // Remove old highlights
+    this.highlights.forEach(h => h.destroy())
+    this.highlights = []
+
+    const { x, y } = gameStore.playerPos
+    const dirs = [[0,-1],[0,1],[-1,0],[1,0]]
+
+    dirs.forEach(([dx, dy]) => {
+      const nx = x + dx
+      const ny = y + dy
+      if (!gameStore.isInBounds(nx, ny)) return
+
+      const wx = nx * TS     // world top-left x
+      const wy = ny * TS     // world top-left y
+
+      // Zone for click detection (positioned at tile center)
+      const zone = this.add.zone(wx + TS / 2, wy + TS / 2, TS, TS)
+      zone.setInteractive()
+      zone.setData('tx', nx)
+      zone.setData('ty', ny)
+      zone.on('pointerdown', () => this.onTileClick(nx, ny))
+      zone.setDepth(4)
+
+      // Visual highlight (Graphics at tile world position, draw relative)
+      const g = this.add.graphics()
+      g.setPosition(wx, wy)
+      g.fillStyle(0xffffff, 0.2)
+      g.fillRoundedRect(1, 1, TS - 2, TS - 2, 4)
+      g.lineStyle(2, 0xffffff, 0.4)
+      g.strokeRoundedRect(1, 1, TS - 2, TS - 2, 4)
+      g.setDepth(3)
+
+      this.highlights.push(zone, g)
+    })
+  }
+
+  /* ═══════════════════════════════════════════
+     INPUT
+     ═══════════════════════════════════════════ */
+  setupInput() {}
+
+  setupSwipeInput() {
+    this.swipeStart = null
+
+    this.input.on('pointerdown', (pointer) => {
+      this.swipeStart = { x: pointer.downX, y: pointer.downY }
+    })
+
+    this.input.on('pointerup', (pointer) => {
+      if (!this.swipeStart || gameStore.isAnimating || gameStore.showEventModal) {
+        this.swipeStart = null
+        return
+      }
+      const dx = pointer.upX - this.swipeStart.x
+      const dy = pointer.upY - this.swipeStart.y
+      const dist = Math.sqrt(dx*dx + dy*dy)
+
+      if (dist < 30) {
+        // Too short = just a tap/clicks — the zone handler handles it
+        this.swipeStart = null
+        return
+      }
+
+      // Determine dominant direction
+      if (Math.abs(dx) > Math.abs(dy)) {
+        // Horizontal swipe
+        const nx = gameStore.playerPos.x + (dx > 0 ? 1 : -1)
+        if (gameStore.isInBounds(nx, gameStore.playerPos.y))
+          this.onTileClick(nx, gameStore.playerPos.y)
+      } else {
+        // Vertical swipe
+        const ny = gameStore.playerPos.y + (dy > 0 ? 1 : -1)
+        if (gameStore.isInBounds(gameStore.playerPos.x, ny))
+          this.onTileClick(gameStore.playerPos.x, ny)
+      }
+      this.swipeStart = null
+    })
+  }
+
+  onTileClick(nx, ny) {
+    if (gameStore.isAnimating || gameStore.showEventModal) return
+    if (!gameStore.canMoveTo(nx, ny)) return
+
+    soundManager.play('step')
+    gameStore.isAnimating = true
+    const targetX = nx * TS + TS / 2
+    const targetY = ny * TS + TS / 2
+
+    // Move in store
+    gameStore.moveTo(nx, ny)
+    gameStore.visitedGrid.add(`${nx},${ny}`)
+
+    // Animate player movement
+    this.tweens.add({
+      targets: this.playerSprite,
+      x: targetX,
+      y: targetY,
+      duration: 180,
+      ease: 'Sine.easeInOut',
+      onComplete: () => {
+        this.updateHighlights()
+        this.updateTreasureReveal()
+        this.syncHUD()
+
+        // Check if this tile has a treasure
+        const collected = gameStore.collectTreasure(nx, ny)
+        if (collected) {
+          soundManager.play('treasure')
+          this.updateTreasureReveal()
+          // Check win
+          const won = gameStore.checkWin()
+          if (won) {
+            soundManager.play('win')
+            gameStore.currentEvent = {
+              type: 'win',
+              title: '🎉 恭喜曬！你贏咗！',
+              description: `你成功收集晒全部 ${gameStore.totalTreasures} 件寶物！\n\n探索進度：${gameStore.visitedCount}/${gameStore.GRID * gameStore.GRID} (${Math.round(gameStore.visitedCount / (gameStore.GRID * gameStore.GRID) * 100)}%)\n回合：${gameStore.turnCount}\n金錢：${gameStore.formatMoney(gameStore.money)}`,
+              effect: { money: 0 },
+              emoji: '🏆',
+            }
+            gameStore.showEventModal = true
+            return
+          }
+          // Show treasure modal
+          gameStore.currentEvent = {
+            type: 'treasure',
+            title: `💎 發現寶物！(${gameStore.treasuresFound}/${gameStore.totalTreasures})`,
+            description: `你喺呢度發現咗一件遠古寶物！\n獲得 $200 獎金！`,
+            effect: { money: 0 },  // Already added in collectTreasure
+            emoji: '💎',
+          }
+          gameStore.showEventModal = true
+        } else {
+          // Normal event
+          this.triggerTileEvent(nx, ny)
+        }
+      }
+    })
+  }
+
+  /* ═══════════════════════════════════════════
+     EVENTS
+     ═══════════════════════════════════════════ */
+  triggerTileEvent(x, y) {
+    const cell = gameStore.grid[y][x]
+    const biome = cell.biome
+
+    // 20% chance of generic event, 80% biome-specific
+    const pool = Math.random() < 0.2 ? GENERIC_EVENTS : (EVENTS[biome] || GENERIC_EVENTS)
+    const ev = pool[Math.floor(Math.random() * pool.length)]
+
+    soundManager.play('event')
+
+    gameStore.currentEvent = {
+      type: 'event',
+      title: ev.title,
+      description: ev.desc,
+      effect: { money: ev.money },
+      emoji: ev.emoji,
+    }
+    gameStore.showEventModal = true
+  }
+
+  /* ═══════════════════════════════════════════
+     STAGE 2: Property / Investment Shop
+     ═══════════════════════════════════════════ */
+  openPropertyShop() {
+    if (gameStore.showEventModal) return
+    const cell = gameStore.grid[gameStore.playerPos.y][gameStore.playerPos.x]
+    const biome = cell.biome
+
+    if (biome !== 'tile-village' && biome !== 'tile-market') {
+      gameStore.currentEvent = {
+        type: 'event',
+        title: '呢度買唔到地',
+        description: '要去村莊或者市集先可以買地投資㗎！',
+        effect: { money: 0 },
+        emoji: '🤷',
+      }
+      gameStore.showEventModal = true
+      return
     }
 
-    // ground circle
-    g.fillStyle(0x1a1a2e, 0.6)
-    g.fillCircle(W / 2, H / 2, 160)
-    g.lineStyle(2, 0x2a2a4e, 0.4)
-    g.strokeCircle(W / 2, H / 2, 160)
+    const available = PROPERTY_TYPES.map(p => ({
+      ...p,
+      affordable: gameStore.money >= p.cost,
+    }))
+
+    const list = available.map(p =>
+      `${p.affordable ? '✅' : '❌'} ${p.icon} ${p.name} — $${p.cost}（回合收入 $${p.income}）`
+    ).join('\n')
+
+    gameStore.currentEvent = {
+      type: 'shop',
+      title: '🏪 投資商店',
+      description: `你可以喺度投資：\n\n${list}\n\n㩒「確定」關閉，㩒骰子掣購買。`,
+      effect: { money: 0 },
+      emoji: '💼',
+      shopItems: available,
+    }
+    gameStore.showEventModal = true
+    this.showPropertyShop = true
   }
 
-  /* ================================================================
-   *  BOARD TILES (pixel-art style)
-   * ================================================================ */
-  drawBoard() {
-    TILE_POS.forEach((pos, i) => {
-      const cfg = TILE_CFG[i]
-      const g = this.add.graphics()
+  buyProperty(typeId) {
+    const p = PROPERTY_TYPES.find(x => x.id === typeId)
+    if (!p) return false
+    if (gameStore.money < p.cost) return false
 
-      // Shadow
-      g.fillStyle(0x000000, 0.35)
-      g.fillRect(pos.x + 3, pos.y + 3, TILE_SIZE, TILE_SIZE)
-
-      // Main fill
-      g.fillStyle(cfg.fill)
-      g.fillRect(pos.x, pos.y, TILE_SIZE, TILE_SIZE)
-
-      // Pixel highlight (top + left)
-      g.fillStyle(cfg.light)
-      g.fillRect(pos.x, pos.y, TILE_SIZE, 3)
-      g.fillRect(pos.x, pos.y, 3, TILE_SIZE)
-
-      // Pixel shadow (bottom + right)
-      g.fillStyle(cfg.dark)
-      g.fillRect(pos.x, pos.y + TILE_SIZE - 3, TILE_SIZE, 3)
-      g.fillRect(pos.x + TILE_SIZE - 3, pos.y, 3, TILE_SIZE)
-
-      // Cross-hatch
-      g.lineStyle(1, cfg.dark, 0.12)
-      g.lineBetween(pos.x + 12, pos.y + TILE_SIZE / 2, pos.x + TILE_SIZE - 12, pos.y + TILE_SIZE / 2)
-      g.lineBetween(pos.x + TILE_SIZE / 2, pos.y + 12, pos.x + TILE_SIZE / 2, pos.y + TILE_SIZE - 12)
-
-      // Icon
-      this.add.text(pos.x + TILE_SIZE / 2, pos.y + 22, cfg.icon, {
-        fontSize: '28px',
-      }).setOrigin(0.5)
-
-      // Label
-      const labelColor = i === 0 ? '#1b5e20' : i === 2 ? '#4e2500' : '#0d47a1'
-      this.add.text(pos.x + TILE_SIZE / 2, pos.y + TILE_SIZE - 12, cfg.label, {
-        fontSize: '11px',
-        fontFamily: '"Press Start 2P", monospace, sans-serif',
-        color: labelColor,
-        stroke: '#000',
-        strokeThickness: 2,
-      }).setOrigin(0.5)
+    gameStore.addMoney(-p.cost)
+    gameStore.ownedProperties.push({
+      ...p,
+      x: gameStore.playerPos.x,
+      y: gameStore.playerPos.y,
+      level: 1,
     })
+    return true
+  }
 
-    // Direction arrows between tiles
-    const arrows = [
-      [0, 1], [1, 2], [2, 3], [3, 0],
-    ]
-    arrows.forEach(([a, b]) => {
-      const g = this.add.graphics()
-      const from = TILE_CENTER[a]
-      const to = TILE_CENTER[b]
-      g.lineStyle(2, 0xccccff, 0.25)
-      g.lineBetween(from.x, from.y, to.x, to.y)
-      // Arrowhead
-      const angle = Phaser.Math.Angle.Between(from.x, from.y, to.x, to.y)
-      const tipX = (from.x + to.x) / 2
-      const tipY = (from.y + to.y) / 2
-      g.fillStyle(0xccccff, 0.25)
-      g.fillTriangle(
-        tipX, tipY,
-        tipX - 6 * Math.cos(angle - 0.5), tipY - 6 * Math.sin(angle - 0.5),
-        tipX - 6 * Math.cos(angle + 0.5), tipY - 6 * Math.sin(angle + 0.5),
-      )
+  collectPropertyIncome() {
+    let total = 0
+    gameStore.ownedProperties.forEach(p => {
+      total += p.income * p.level
     })
+    if (total > 0) {
+      gameStore.addMoney(total)
+    }
+    return total
   }
 
-  /* ================================================================
-   *  PLAYER (pixel-art character drawn in a container)
-   * ================================================================ */
-  createPlayer() {
-    const start = TILE_CENTER[gameStore.currentPlayer.position]
-    this.playerContainer = this.add.container(start.x, start.y)
+  /* ═══════════════════════════════════════════
+     STAGE 3: Dice action (search / gamble)
+     ═══════════════════════════════════════════ */
+  onDiceAction() {
+    if (gameStore.isAnimating || gameStore.showEventModal) return
 
-    const g = this.add.graphics()
-    // Body (cyan)
-    g.fillStyle(0x4fc3f7)
-    g.fillRect(-10, -12, 20, 18)
-    // Highlight
-    g.fillStyle(0x81d4fa)
-    g.fillRect(-8, -10, 16, 2)
+    const roll = Phaser.Math.Between(1, 6)
+    const bonus = Math.floor(roll * 10)
 
-    // Head
-    g.fillStyle(0x81d4fa)
-    g.fillRect(-8, -20, 16, 10)
-
-    // Eyes (white)
-    g.fillStyle(0xffffff)
-    g.fillRect(-5, -18, 3, 3)
-    g.fillRect(2, -18, 3, 3)
-    // Pupils
-    g.fillStyle(0x000000)
-    g.fillRect(-4, -17, 2, 2)
-    g.fillRect(3, -17, 2, 2)
-
-    // Mouth (smile)
-    g.fillStyle(0x000000)
-    g.fillRect(-3, -13, 6, 1)
-
-    // Legs
-    g.fillStyle(0x29b6f6)
-    g.fillRect(-7, 6, 5, 6)
-    g.fillRect(2, 6, 5, 6)
-
-    // Shoes
-    g.fillStyle(0x795548)
-    g.fillRect(-8, 10, 7, 3)
-    g.fillRect(1, 10, 7, 3)
-
-    this.playerContainer.add(g)
+    gameStore.currentEvent = {
+      type: 'event',
+      title: `🎲 探索擲骰 — ${roll}點`,
+      description: `你喺呢度仔細搜索，結果發現咗價值 $${bonus} 嘅物品！`,
+      effect: { money: bonus },
+      emoji: '🎲',
+    }
+    gameStore.showEventModal = true
   }
 
-  /* ================================================================
-   *  SCENE UI (title, money display, dice result)
-   * ================================================================ */
-  createUI() {
-    // Title
-    this.add.text(W / 2, 24, '🌍 非洲探險 2', {
-      fontSize: '16px',
-      fontFamily: '"Press Start 2P", monospace, sans-serif',
-      color: '#e2b714',
-      stroke: '#000',
-      strokeThickness: 4,
-    }).setOrigin(0.5)
-
-    // Dice result
-    this.diceText = this.add.text(W / 2, 70, '', {
-      fontSize: '42px',
-      fontFamily: '"Press Start 2P", monospace, sans-serif',
+  /* ═══════════════════════════════════════════
+     SCENE UI
+     ═══════════════════════════════════════════ */
+  createSceneUI() {
+    this.exploreText = this.add.text(4, 4, '', {
+      fontSize: '11px',
+      fontFamily: 'Arial, sans-serif',
       color: '#ffffff',
       stroke: '#000',
-      strokeThickness: 5,
-    }).setOrigin(0.5).setVisible(false).setDepth(10)
-
-    // Money display (left)
-    this.moneyText = this.add.text(20, 8, '', {
-      fontSize: '14px',
-      fontFamily: '"Press Start 2P", monospace, sans-serif',
-      color: '#ffd700',
-      stroke: '#000',
-      strokeThickness: 3,
-    })
-
-    // Turn counter (right)
-    this.turnText = this.add.text(W - 20, 8, '', {
-      fontSize: '11px',
-      fontFamily: '"Press Start 2P", monospace, sans-serif',
-      color: '#aaaacc',
-      stroke: '#000',
       strokeThickness: 2,
-    }).setOrigin(1, 0)
+    }).setScrollFactor(0).setDepth(20)
 
-    // Instruction text (centered at bottom of canvas)
-    this.helpText = this.add.text(W / 2, H - 20, '撳右下角 🎲 掣擲骰', {
+    this.statusText = this.add.text(W - 4, 4, '', {
       fontSize: '10px',
-      fontFamily: '"Press Start 2P", monospace, sans-serif',
-      color: '#666688',
+      fontFamily: 'Arial, sans-serif',
+      color: '#88aacc',
       stroke: '#000',
       strokeThickness: 2,
-    }).setOrigin(0.5)
+    }).setOrigin(1, 0).setScrollFactor(0).setDepth(20)
   }
 
-  syncMoney() {
-    const p = gameStore.currentPlayer
-    if (this.moneyText) {
-      this.moneyText.setText(`💰 ${gameStore.formatMoney(p.money)}`)
+  syncHUD() {
+    const v = gameStore.visitedCount
+    const total = gameStore.GRID * gameStore.GRID
+    const pct = Math.round(v / total * 100)
+    if (this.exploreText) {
+      this.exploreText.setText(`🗺️ ${v}/${total} (${pct}%)`)
     }
-    if (this.turnText) {
-      this.turnText.setText(`${gameStore.turnCount}`)
+    if (this.statusText) {
+      const props = gameStore.ownedProperties.length
+      const tFound = gameStore.treasuresFound
+      this.statusText.setText(`💰 ${gameStore.formatMoney(gameStore.money)}  🏠 ${props}  🏆${tFound}/5  T${gameStore.turnCount}`)
     }
   }
 
-  /* ================================================================
-   *  EVENT LISTENERS (Phaser ↔ Vue bridge via CustomEvent)
-   * ================================================================ */
+  /* ═══════════════════════════════════════════
+     COMMUNICATION
+     ═══════════════════════════════════════════ */
   listen() {
-    const c1 = onGameEvent(PHASER_EVENTS.ROLL_DICE, () => this.onRollDice())
-    const c2 = onGameEvent(PHASER_EVENTS.CLOSE_EVENT, () => this.onEventClosed())
-    this.cleanupFns = [c1, c2]
-
-    this.events.on('shutdown', () => {
-      this.cleanupFns.forEach(fn => fn())
-      this.cleanupFns = []
-    })
+    this.cleanup = [
+      onGameEvent('game:roll-dice',  () => this.onDiceAction()),
+      onGameEvent('game:close-event', () => this.onEventClose()),
+    ]
+    this.events.on('shutdown', () => this.cleanup.forEach(f => f()))
   }
 
-  /* ================================================================
-   *  DICE ROLL
-   * ================================================================ */
-  onRollDice() {
-    if (!gameStore.canRoll || gameStore.isAnimating) return
-
-    gameStore.canRoll = false
-    gameStore.isAnimating = true
-    gameStore.showDice = true
-
-    const steps = Phaser.Math.Between(1, 3)
-    dispatchGameEvent(PHASER_EVENTS.DICE_START, { steps })
-
-    // Animate cycling numbers
-    this.animateDice(steps)
-  }
-
-  animateDice(finalSteps) {
-    this.diceText.setVisible(true)
-    let frame = 0
-    const totalFrames = 12
-
-    const timer = this.time.addEvent({
-      delay: 70,
-      repeat: totalFrames - 1,
-      callback: () => {
-        frame++
-        const val = frame < totalFrames ? Phaser.Math.Between(1, 6) : finalSteps
-        this.diceText.setText(val.toString())
-        // Bounce scale
-        this.diceText.setScale(1 + (Math.random() * 0.08))
-      },
-    })
-
-    this.time.delayedCall(70 * totalFrames + 80, () => {
-      this.diceText.setVisible(false)
-      dispatchGameEvent(PHASER_EVENTS.DICE_END, { steps: finalSteps })
-      this.movePlayer(finalSteps)
-    })
-  }
-
-  /* ================================================================
-   *  PLAYER MOVEMENT (step-by-step tweens)
-   * ================================================================ */
-  movePlayer(steps) {
-    const startPos = gameStore.currentPlayer.position
-
-    for (let i = 1; i <= steps; i++) {
-      const nextPos = (startPos + i) % 4
-      const target = TILE_CENTER[nextPos]
-      const delay = (i - 1) * 350
-
-      this.tweens.add({
-        targets: this.playerContainer,
-        x: target.x,
-        y: target.y,
-        duration: 280,
-        delay,
-        ease: 'Sine.easeInOut',
-        onStart: () => {
-          // Squash effect on each step
-          this.tweens.add({
-            targets: this.playerContainer,
-            scaleY: 0.7,
-            duration: 70,
-            yoyo: true,
-            ease: 'Bounce.easeOut',
-          })
-        },
-      })
+  onEventClose() {
+    const income = this.collectPropertyIncome()
+    if (income > 0) {
+      // Silently added
     }
 
-    // After all steps trigger the landed event
-    this.time.delayedCall(steps * 350 + 120, () => {
-      gameStore.movePlayer(steps)
-      this.syncMoney()
-
-      const cellCfg = TILE_CFG[gameStore.currentCellIndex]
-      dispatchGameEvent(PHASER_EVENTS.PLAYER_LANDED, {
-        cellIndex: gameStore.currentCellIndex,
-        cellType: cellCfg.type,
-        cellLabel: cellCfg.label,
-      })
-    })
-  }
-
-  /* ================================================================
-   *  EVENT CLOSED (modal dismissed by user)
-   * ================================================================ */
-  onEventClosed() {
     gameStore.showEventModal = false
     gameStore.resetTurn()
-    this.syncMoney()
-    this.helpText.setText('撳右下角 🎲 掣擲骰')
+    this.syncHUD()
   }
 }
