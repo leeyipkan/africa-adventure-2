@@ -105,6 +105,15 @@ export class BoardScene extends Phaser.Scene {
     // Draw the map
     this.drawGrid()
 
+    // Reveal initial fog around start position
+    this.revealTile(0, 0)
+    const initialReveal = [[0,-1],[0,1],[-1,0],[1,0]]
+    for (const [dx, dy] of initialReveal) {
+      if (gameStore.isInBounds(dx, dy)) {
+        // Adjacent tiles shown as dim preview (keep fog, but this triggers partial reveal)
+      }
+    }
+
     // Player
     this.createPlayer()
 
@@ -135,28 +144,74 @@ export class BoardScene extends Phaser.Scene {
   }
 
   /* ═══════════════════════════════════════════
-     GRID RENDERING
+     GRID RENDERING (Fog of War)
      ═══════════════════════════════════════════ */
   drawGrid() {
     const grid = gameStore.grid
+    this.fogTiles = []  // {bg, border, x, y} for unvisited tiles
+    this.tileSprites = []
+
     for (let y = 0; y < GRID; y++) {
       for (let x = 0; x < GRID; x++) {
         const cell = grid[y][x]
         const px = x * TS + TS / 2
         const py = y * TS + TS / 2
 
-        // Sprite
-        const sprite = this.add.image(px, py, cell.biome)
-        sprite.setScale(TS / 256)   // 256 -> 32
+        // ── VISITED: show full tile sprite ──
+        if (cell.visited) {
+          const sprite = this.add.image(px, py, cell.biome)
+          sprite.setScale(TS / 256)
 
-        // Border
-        const border = this.add.graphics()
-        border.lineStyle(1, 0x000000, 0.15)
-        border.strokeRect(x * TS, y * TS, TS, TS)
+          const border = this.add.graphics()
+          border.lineStyle(1, 0x000000, 0.15)
+          border.strokeRect(x * TS, y * TS, TS, TS)
 
-        this.tileSprites.push({ sprite, border, x, y })
+          this.tileSprites.push({ sprite, border, x, y })
+        } else {
+          // ── UNVISITED: dark fog tile ──
+          const bg = this.add.graphics()
+          bg.fillStyle(0x0d0d1a, 1)
+          bg.fillRect(x * TS, y * TS, TS, TS)
+
+          // Subtle border so grid is still visible
+          const border = this.add.graphics()
+          border.lineStyle(1, 0x1a1a33, 0.3)
+          border.strokeRect(x * TS, y * TS, TS, TS)
+
+          this.fogTiles.push({ bg, border, x, y })
+        }
       }
     }
+  }
+
+  /**
+   * Reveal a fog tile when player first visits it
+   */
+  revealTile(x, y) {
+    const cell = gameStore.grid[y]?.[x]
+    if (!cell) return
+
+    // Already revealed
+    const idx = this.fogTiles.findIndex(t => t.x === x && t.y === y)
+    if (idx === -1) return
+
+    // Remove fog
+    const fog = this.fogTiles[idx]
+    fog.bg.destroy()
+    fog.border.destroy()
+    this.fogTiles.splice(idx, 1)
+
+    // Add tile sprite
+    const px = x * TS + TS / 2
+    const py = y * TS + TS / 2
+    const sprite = this.add.image(px, py, cell.biome)
+    sprite.setScale(TS / 256)
+
+    const border = this.add.graphics()
+    border.lineStyle(1, 0x000000, 0.15)
+    border.strokeRect(x * TS, y * TS, TS, TS)
+
+    this.tileSprites.push({ sprite, border, x, y })
   }
 
   /* ═══════════════════════════════════════════
@@ -339,6 +394,12 @@ export class BoardScene extends Phaser.Scene {
     const targetX = nx * TS + TS / 2
     const targetY = ny * TS + TS / 2
 
+    // Check if destination is fogged (shouldn't happen with highlights, but safe)
+    if (!gameStore.grid[ny][nx].visited) {
+      gameStore.grid[ny][nx].visited = true
+      gameStore.visitedCount++
+    }
+
     // Move in store
     gameStore.moveTo(nx, ny)
     gameStore.visitedGrid.add(`${nx},${ny}`)
@@ -351,6 +412,16 @@ export class BoardScene extends Phaser.Scene {
       duration: 180,
       ease: 'Sine.easeInOut',
       onComplete: () => {
+        // Reveal destination tile + adjacent tiles (fog of war)
+        this.revealTile(nx, ny)
+        const dirs = [[0,-1],[0,1],[-1,0],[1,0]]
+        for (const [dx, dy] of dirs) {
+          if (gameStore.isInBounds(nx+dx, ny+dy)) {
+            const adjCell = gameStore.grid[ny+dy][nx+dx]
+            if (adjCell.visited) this.revealTile(nx+dx, ny+dy)
+          }
+        }
+
         this.updateHighlights()
         this.updateTreasureReveal()
         this.syncHUD()
