@@ -9,7 +9,7 @@ export const gameStore = reactive({
 
   // ── Grid ──
   GRID: 20,
-  tileSize: 32,
+  tileSize: 48,
   grid: [],        // 2D array: [{ biome, visited, hasEvent, owner, building }]
   visitedCount: 0,
 
@@ -33,6 +33,7 @@ export const gameStore = reactive({
   isAnimating: false,
   showEventModal: false,
   currentEvent: null,
+  gameStarted: false,
 
   // ── Computed-like helpers ──
   formatMoney(amount) {
@@ -62,7 +63,7 @@ export const gameStore = reactive({
   },
 
   addMoney(amount) {
-    this.money += amount
+    this.money = Math.max(0, this.money + amount)
   },
 
   resetTurn() {
@@ -250,4 +251,118 @@ export const gameStore = reactive({
 })
 
 // For tracking visited cells during movement (avoid re-triggering events)
+// ── Save / Load ──
+gameStore.saveProgress = function() {
+  try {
+    // Save full grid biome data + visited state for restore
+    const gridData = this.grid.map(row => row.map(cell => ({
+      biome: cell.biome,
+      visited: cell.visited,
+      owner: cell.owner,
+      building: cell.building,
+    })))
+
+    const data = {
+      playerPos: { ...this.playerPos },
+      money: this.money,
+      turnCount: this.turnCount,
+      name: this.name,
+      visitedCount: this.visitedCount,
+      treasuresFound: this.treasuresFound,
+      totalTreasures: this.totalTreasures,
+      gameWon: this.gameWon,
+      treasures: this.treasures.map(t => ({ ...t })),
+      grid: gridData,
+      ownedProperties: JSON.parse(JSON.stringify(this.ownedProperties)),
+    }
+    localStorage.setItem('africa2_save', JSON.stringify(data))
+    return true
+  } catch (e) {
+    console.warn('Save failed:', e)
+    return false
+  }
+}
+
+gameStore.loadProgress = function() {
+  try {
+    const raw = localStorage.getItem('africa2_save')
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch (e) { return null }
+}
+
+gameStore.restoreFromSave = function(saved) {
+  if (!saved) return false
+  // Restore scalar values
+  this.playerPos = saved.playerPos || { x: 0, y: 0 }
+  this.money = saved.money ?? 1000
+  this.turnCount = saved.turnCount ?? 0
+  this.name = saved.name || '探險家'
+  this.visitedCount = saved.visitedCount ?? 1
+  this.treasuresFound = saved.treasuresFound ?? 0
+  this.totalTreasures = saved.totalTreasures ?? 5
+  this.gameWon = saved.gameWon ?? false
+  this.treasures = (saved.treasures || []).map(t => ({ ...t }))
+  this.ownedProperties = saved.ownedProperties ? JSON.parse(JSON.stringify(saved.ownedProperties)) : []
+
+  // Restore full grid
+  if (saved.grid && saved.grid.length === this.GRID) {
+    for (let y = 0; y < this.GRID; y++) {
+      for (let x = 0; x < this.GRID; x++) {
+        if (!this.grid[y]) this.grid[y] = []
+        if (saved.grid[y] && saved.grid[y][x]) {
+          this.grid[y][x] = {
+            x, y,
+            biome: saved.grid[y][x].biome || 'tile-grass',
+            visited: saved.grid[y][x].visited || false,
+            hasEvent: true,
+            owner: saved.grid[y][x].owner || null,
+            building: saved.grid[y][x].building || null,
+          }
+        }
+      }
+    }
+  }
+
+  // Restore visitedGrid from grid data
+  this.visitedGrid = new Set()
+  for (let y = 0; y < this.GRID; y++) {
+    for (let x = 0; x < this.GRID; x++) {
+      if (this.grid[y]?.[x]?.visited) {
+        this.visitedGrid.add(`${x},${y}`)
+      }
+    }
+  }
+
+  this.updateCompassHint()
+  this.gameStarted = true
+  this.phase = 'explore'
+  return true
+}
+
+gameStore.clearProgress = function() {
+  localStorage.removeItem('africa2_save')
+  this.resetGame()
+}
+
+gameStore.resetGame = function() {
+  this.playerPos = { x: 0, y: 0 }
+  this.money = 1000
+  this.turnCount = 0
+  this.visitedCount = 1
+  this.treasuresFound = 0
+  this.totalTreasures = 5
+  this.gameWon = false
+  this.ownedProperties = []
+  this.treasures = []
+  this.currentEvent = null
+  this.showEventModal = false
+  this.isAnimating = false
+  this.phase = 'explore'
+  this.nearestTreasureDir = null
+  this.nearestTreasureDist = Infinity
+  this.gameStarted = false
+  if (this.visitedGrid) this.visitedGrid.clear()
+}
+
 gameStore.visitedGrid = new Set()

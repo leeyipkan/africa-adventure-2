@@ -81,6 +81,18 @@
       >
         <span class="text-base">{{ isMuted ? '🔇' : '🔊' }}</span>
       </button>
+
+      <!-- Shop button -->
+      <button
+        @click="openShop"
+        class="pointer-events-auto w-9 h-9 rounded-full
+               bg-black/60 backdrop-blur-sm border border-emerald-600/50
+               flex items-center justify-center
+               active:scale-90 transition-all duration-75"
+        aria-label="投資商店"
+      >
+        <span class="text-base">🏪</span>
+      </button>
     </div>
   </div>
 </template>
@@ -89,11 +101,16 @@
 import { ref } from 'vue'
 import { gameStore } from '../../stores/gameStore.js'
 import { soundManager } from '../../phaser/SoundManager.js'
+import { dispatchGameEvent } from '../../phaser/events.js'
 
 const store = gameStore
 const isMuted = ref(false)
 
 function toggleSound() {
   isMuted.value = soundManager.toggleMute()
+}
+
+function openShop() {
+  dispatchGameEvent('game:open-shop')
 }
 </script>

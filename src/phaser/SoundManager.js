@@ -6,6 +6,8 @@ export class SoundManager {
   constructor() {
     this.muted = false
     this.ctx = null
+    this.bgmNodes = []  // For background music cleanup
+    this.bgmPlaying = false
   }
 
   _ensureCtx() {
@@ -22,11 +24,95 @@ export class SoundManager {
 
   setMuted(v) {
     this.muted = v
+    if (v) this.stopBGM()
+    else this.startBGM()
   }
 
   toggleMute() {
     this.muted = !this.muted
+    if (this.muted) this.stopBGM()
+    else this.startBGM()
     return this.muted
+  }
+
+  startBGM() {
+    if (this.bgmPlaying || this.muted) return
+    if (!this._ensureCtx()) return
+    this.bgmPlaying = true
+    this._playAmbient()
+  }
+
+  stopBGM() {
+    this.bgmPlaying = false
+    if (this._bgmTimer) {
+      clearTimeout(this._bgmTimer)
+      this._bgmTimer = null
+    }
+    this.bgmNodes.forEach(n => {
+      try { n.stop() } catch(e) {}
+    })
+    this.bgmNodes = []
+  }
+
+  /** Ambient African-style drone with gentle rhythm */
+  _playAmbient() {
+    if (!this.bgmPlaying || this.muted || !this.ctx) return
+    const ctx = this.ctx
+    const now = ctx.currentTime
+    const vol = 0.025  // Very quiet — background only
+
+    // Low drone (bass note, pentatonic: C3)
+    const drone = ctx.createOscillator()
+    drone.type = 'sine'
+    drone.frequency.value = 131
+    const dGain = ctx.createGain()
+    dGain.gain.setValueAtTime(vol, now)
+    dGain.gain.linearRampToValueAtTime(vol * 0.5, now + 2)
+    drone.connect(dGain).connect(ctx.destination)
+    drone.start(now)
+    this.bgmNodes.push(drone)
+
+    // Gentle fifth (G3)
+    const fifth = ctx.createOscillator()
+    fifth.type = 'sine'
+    fifth.frequency.value = 196
+    const fGain = ctx.createGain()
+    fGain.gain.setValueAtTime(vol * 0.4, now)
+    fGain.gain.linearRampToValueAtTime(0, now + 3)
+    fifth.connect(fGain).connect(ctx.destination)
+    fifth.start(now)
+    this.bgmNodes.push(fifth)
+
+    // Subtle kalimba-style rhythm (loop)
+    const notes = [262, 330, 392, 330]  // C4 E4 G4 E4 — pentatonic
+    const noteDur = 0.6
+    const loopLen = notes.length * noteDur
+
+    const scheduleNote = (offset) => {
+      if (!this.bgmPlaying || this.muted) return
+      const idx = Math.floor((offset / noteDur) % notes.length)
+      const freq = notes[idx]
+      const t = now + offset
+      const osc = ctx.createOscillator()
+      osc.type = 'triangle'
+      osc.frequency.value = freq
+      const g = ctx.createGain()
+      g.gain.setValueAtTime(0, t)
+      g.gain.linearRampToValueAtTime(vol * 0.6, t + 0.02)
+      g.gain.linearRampToValueAtTime(0, t + noteDur * 0.8)
+      osc.connect(g).connect(ctx.destination)
+      osc.start(t)
+      osc.stop(t + noteDur)
+      this.bgmNodes.push(osc)
+    }
+
+    // Schedule 4 loops ahead (about 10 seconds)
+    for (let i = 0; i < 16; i++) {
+      scheduleNote(i * noteDur)
+    }
+
+    // Re-schedule after the loop
+    this._bgmTimer = setTimeout(() => this._playAmbient(), loopLen * 4 * 1000 * 0.8)
   }
 
   play(name) {

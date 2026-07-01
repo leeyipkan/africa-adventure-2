@@ -4,7 +4,7 @@ import { gameStore } from '../../stores/gameStore.js'
 import { soundManager } from '../SoundManager.js'
 
 // ── Constants ──
-const W = 800, H = 500
+const W = 960, H = 640
 const TS = gameStore.tileSize       // 32
 const GRID = gameStore.GRID          // 20
 const MAP_W = GRID * TS             // 640
@@ -96,10 +96,26 @@ export class BoardScene extends Phaser.Scene {
   create() {
     this.cameras.main.setBackgroundColor('#0a0a1a')
 
-    // Generate the 20×20 grid
-    gameStore.generateGrid()
-    gameStore.visitedGrid.clear()
-    gameStore.visitedGrid.add('0,0')
+    // Check if we're continuing from a saved game (grid already restored)
+    const isContinue = gameStore.grid.length > 0 && gameStore.grid[0] && gameStore.grid[0][0]
+
+    if (!isContinue) {
+      // Generate the 20×20 grid (new game only)
+      gameStore.generateGrid()
+      gameStore.visitedGrid.clear()
+      gameStore.visitedGrid.add('0,0')
+    } else {
+      // Restore visitedGrid from already-restored grid data
+      gameStore.visitedGrid = new Set()
+      for (let y = 0; y < gameStore.GRID; y++) {
+        for (let x = 0; x < gameStore.GRID; x++) {
+          if (gameStore.grid[y]?.[x]?.visited) {
+            gameStore.visitedGrid.add(`${x},${y}`)
+          }
+        }
+      }
+    }
+
     gameStore.updateCompassHint()
 
     // Draw the map
@@ -109,7 +125,13 @@ export class BoardScene extends Phaser.Scene {
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
         const rx = dx, ry = dy
-        if (gameStore.isInBounds(rx, ry)) this.revealTile(rx, ry)
+        if (gameStore.isInBounds(rx, ry)) {
+          this.revealTile(rx, ry)
+          if (!gameStore.grid[ry][rx].visited) {
+            gameStore.grid[ry][rx].visited = true
+            gameStore.visitedCount++
+          }
+        }
       }
     }
 
@@ -139,7 +161,10 @@ export class BoardScene extends Phaser.Scene {
     this.syncHUD()
 
     // Resume AudioContext on first interaction
-    this.input.once('pointerdown', () => soundManager._ensureCtx())
+    this.input.once('pointerdown', () => {
+      soundManager._ensureCtx()
+      soundManager.startBGM()
+    })
   }
 
   /* ═══════════════════════════════════════════
@@ -393,12 +418,6 @@ export class BoardScene extends Phaser.Scene {
     const targetX = nx * TS + TS / 2
     const targetY = ny * TS + TS / 2
 
-    // Check if destination is fogged (shouldn't happen with highlights, but safe)
-    if (!gameStore.grid[ny][nx].visited) {
-      gameStore.grid[ny][nx].visited = true
-      gameStore.visitedCount++
-    }
-
     // Move in store
     gameStore.moveTo(nx, ny)
     gameStore.visitedGrid.add(`${nx},${ny}`)
@@ -416,8 +435,14 @@ export class BoardScene extends Phaser.Scene {
         const dirs = [[0,-1],[0,1],[-1,0],[1,0]]
         for (const [dx, dy] of dirs) {
           if (gameStore.isInBounds(nx+dx, ny+dy)) {
+            // Reveal adjacent tiles even if not stepped on (fog expansion)
+            this.revealTile(nx+dx, ny+dy)
+            // Mark as visited for fog, but don't re-trigger events
             const adjCell = gameStore.grid[ny+dy][nx+dx]
-            if (adjCell.visited) this.revealTile(nx+dx, ny+dy)
+            if (!adjCell.visited) {
+              adjCell.visited = true
+              gameStore.visitedCount++
+            }
           }
         }
 
@@ -540,6 +565,28 @@ export class BoardScene extends Phaser.Scene {
     return true
   }
 
+  handleBuyProperty(typeId) {
+    const ok = this.buyProperty(typeId)
+    if (ok) {
+      gameStore.currentEvent = {
+        type: 'event',
+        title: '✅ 買咗啦！',
+        description: `你成功買咗 ${PROPERTY_TYPES.find(p => p.id === typeId)?.name}！\n每回合收入 +$${PROPERTY_TYPES.find(p => p.id === typeId)?.income}！`,
+        effect: { money: 0 },
+        emoji: '🏪',
+      }
+    } else {
+      gameStore.currentEvent = {
+        type: 'event',
+        title: '❌ 唔夠錢',
+        description: '你唔夠錢買呢項投資⋯⋯',
+        effect: { money: 0 },
+        emoji: '😅',
+      }
+    }
+    gameStore.showEventModal = true
+  }
+
   collectPropertyIncome() {
     let total = 0
     gameStore.ownedProperties.forEach(p => {
@@ -610,8 +657,10 @@ export class BoardScene extends Phaser.Scene {
      ═══════════════════════════════════════════ */
   listen() {
     this.cleanup = [
-      onGameEvent('game:roll-dice',  () => this.onDiceAction()),
-      onGameEvent('game:close-event', () => this.onEventClose()),
+      onGameEvent('game:roll-dice',    () => this.onDiceAction()),
+      onGameEvent('game:close-event',  () => this.onEventClose()),
+      onGameEvent('game:open-shop',    () => this.openPropertyShop()),
+      onGameEvent('game:buy-property', (d) => this.handleBuyProperty(d.typeId)),
     ]
     this.events.on('shutdown', () => this.cleanup.forEach(f => f()))
   }
@@ -625,5 +674,7 @@ export class BoardScene extends Phaser.Scene {
     gameStore.showEventModal = false
     gameStore.resetTurn()
     this.syncHUD()
+    // Auto-save after each turn
+    gameStore.saveProgress()
   }
 }
