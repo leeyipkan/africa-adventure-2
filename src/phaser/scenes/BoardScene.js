@@ -105,12 +105,11 @@ export class BoardScene extends Phaser.Scene {
     // Draw the map
     this.drawGrid()
 
-    // Reveal initial fog around start position
-    this.revealTile(0, 0)
-    const initialReveal = [[0,-1],[0,1],[-1,0],[1,0]]
-    for (const [dx, dy] of initialReveal) {
-      if (gameStore.isInBounds(dx, dy)) {
-        // Adjacent tiles shown as dim preview (keep fog, but this triggers partial reveal)
+    // Reveal initial fog around start position (show 3×3 radius)
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const rx = dx, ry = dy
+        if (gameStore.isInBounds(rx, ry)) this.revealTile(rx, ry)
       }
     }
 
